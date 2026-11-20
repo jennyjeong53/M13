@@ -1,0 +1,277 @@
+---
+title: "Case 31: Measurement Model Assessment"
+author: "Yujin Jeong"
+date: today
+format:
+  html:
+    toc: true
+    toc-title: "Contents"
+    toc-depth: 3
+    number-sections: true
+    smooth-scroll: true
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Purpose and Case Context
+
+This report evaluates the measurement model for Case 31: Employees Federal Credit Union. The analysis uses confirmatory factor analysis (CFA) to examine two multi-item constructs: attitudes toward employee proficiencies and attitudes toward operational effectiveness.
+
+The first factor is measured by Q3 through Q6. The second factor is measured by Q9r, Q10, Q11, Q12, and Q31 through Q34. The purpose of CFA is to determine whether the observed survey items provide reasonable evidence for the proposed latent constructs. CFA evaluates the measurement model; it does not test causal hypotheses.
+
+## Learning Notes: CFA and Measurement Models
+
+A latent construct is a concept that cannot be measured directly. Instead, it is represented by several observed survey items. In this report, employee proficiency and operational effectiveness are treated as latent constructs because each is measured by multiple questionnaire items.
+
+CFA tests whether the observed items follow a hypothesized factor structure. Important evidence includes model fit, standardized factor loadings, internal consistency, convergent validity, and discriminant validity.
+
+## Case 31 Constructs and Indicators
+
+| Latent construct | Indicators | Interpretation |
+|---|---|---|
+| Employee Proficiencies | Q3, Q4, Q5, Q6 | Members' attitudes toward employee proficiency |
+| Operational Effectiveness | Q9r, Q10, Q11, Q12, Q31, Q32, Q33, Q34 | Members' evaluations of Credit Union management and operations |
+
+Single-item variables are not included as latent factors because a latent construct needs multiple indicators to estimate measurement error and factor loadings.
+
+## Data Preparation and Inspection
+
+```{r}
+library(haven)
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(lavaan)
+
+case31 <- read_sav("Case 31 Data_efcu_4.sav") |>
+  mutate(
+    across(c(q3, q4, q5, q6, q9_r, q10, q11, q12, q31, q32, q33, q34), as.numeric)
+  )
+
+cfa_items <- c("q3", "q4", "q5", "q6", "q9_r", "q10", "q11", "q12", "q31", "q32", "q33", "q34")
+
+case31 |>
+  select(all_of(cfa_items)) |>
+  glimpse()
+```
+
+The data file is imported with `haven`. The CFA variables are converted to numeric values so that they can be used in the measurement model.
+
+### Number of Observations
+
+```{r}
+data_information <- data.frame(
+  measure = c("Total observations", "Observations with complete CFA data"),
+  value = c(
+    nrow(case31),
+    sum(complete.cases(case31 |> select(all_of(cfa_items))))
+  )
+)
+
+kable(data_information, caption = "Number of observations used in the CFA preparation")
+```
+
+### Missing Values
+
+```{r}
+missing_table <- case31 |>
+  summarise(across(all_of(cfa_items), ~ sum(is.na(.x)))) |>
+  pivot_longer(
+    cols = everything(),
+    names_to = "item",
+    values_to = "missing_n"
+  )
+
+kable(missing_table, caption = "Missing values for CFA indicators")
+```
+
+### Descriptive Statistics
+
+```{r}
+descriptive_table <- case31 |>
+  summarise(across(
+    all_of(cfa_items),
+    list(
+      n = ~ sum(!is.na(.x)),
+      mean = ~ mean(.x, na.rm = TRUE),
+      sd = ~ sd(.x, na.rm = TRUE),
+      min = ~ min(.x, na.rm = TRUE),
+      max = ~ max(.x, na.rm = TRUE)
+    )
+  )) |>
+  pivot_longer(
+    cols = everything(),
+    names_to = c("item", ".value"),
+    names_sep = "_"
+  ) |>
+  mutate(across(where(is.numeric), ~ round(.x, 2)))
+
+kable(descriptive_table, caption = "Descriptive statistics for CFA indicators")
+```
+
+## Reverse-Coding Verification
+
+The analysis table uses `q9_r`, meaning that Q9 should be oriented so that higher values represent a more favorable evaluation. The prepared Case 31 file already contains `q9_r`. Therefore, Q9 is not reverse-coded a second time in this report.
+
+```{r}
+q9_check <- case31 |>
+  summarise(
+    q9_r_min = min(q9_r, na.rm = TRUE),
+    q9_r_max = max(q9_r, na.rm = TRUE),
+    q9_r_mean = mean(q9_r, na.rm = TRUE)
+  ) |>
+  mutate(across(everything(), ~ round(.x, 2)))
+
+kable(q9_check, caption = "Check of the prepared reverse-coded Q9 variable")
+```
+
+The `q9_r` variable is used as provided in the cleaned data. Reversing it again would change the intended direction and would make interpretation incorrect.
+
+## Hypothesized Two-Factor CFA Model
+
+The hypothesized model contains two correlated latent factors. Employee Proficiencies is measured by Q3–Q6. Operational Effectiveness is measured by Q9r, Q10, Q11, Q12, and Q31–Q34. The two factors are allowed to correlate because positive evaluations of employees may be related to positive evaluations of Credit Union operations.
+
+```{r}
+measurement_model <- '
+  Employee_Proficiencies =~ q3 + q4 + q5 + q6
+  Operational_Effectiveness =~ q9_r + q10 + q11 + q12 + q31 + q32 + q33 + q34
+'
+
+measurement_model
+```
+
+The model is identified by fixing the scale of each latent factor through lavaan's default marker-variable method. The first loading of each factor is fixed to 1, allowing the remaining loadings and factor variances to be estimated.
+
+## CFA Estimation
+
+Q11 and Q12 are categorical response variables. They are therefore declared as ordered variables, and the model is estimated using the WLSMV estimator. The other indicators are treated as numeric ordered-response measures for this course analysis.
+
+```{r}
+ordered_items <- c("q11", "q12")
+
+cfa_fit <- cfa(
+  model = measurement_model,
+  data = case31,
+  estimator = "WLSMV",
+  ordered = ordered_items,
+  missing = "pairwise"
+)
+
+summary(
+  cfa_fit,
+  fit.measures = TRUE,
+  standardized = TRUE
+)
+```
+
+## CFA Results
+
+### Model Fit
+
+```{r}
+fit_table <- fitMeasures(
+  cfa_fit,
+  c("chisq", "df", "pvalue", "cfi", "tli", "rmsea", "rmsea.ci.lower", "rmsea.ci.upper", "srmr")
+) |>
+  tibble::enframe(name = "measure", value = "value") |>
+  mutate(value = round(value, 3))
+
+kable(fit_table, caption = "CFA model-fit statistics")
+```
+
+The model-fit statistics should be interpreted together rather than using one cutoff by itself. CFI and TLI closer to 1 generally indicate better relative fit. Lower RMSEA and SRMR values generally indicate smaller residual differences between the observed and model-implied relationships. The chi-square test is sensitive to sample size, so it should be considered with the other fit measures.
+
+### Standardized Factor Loadings
+
+```{r}
+loading_table <- parameterEstimates(
+  cfa_fit,
+  standardized = TRUE
+) |>
+  filter(op == "=~") |>
+  transmute(
+    factor = lhs,
+    item = rhs,
+    loading = round(std.all, 3),
+    se = round(se, 3),
+    z = round(z, 3),
+    p_value = round(pvalue, 3)
+  )
+
+kable(
+  loading_table,
+  col.names = c("Factor", "Item", "Standardized loading", "SE", "z", "p-value"),
+  caption = "Standardized factor loadings"
+)
+```
+
+Standardized loadings indicate how strongly each item represents its intended factor. Loadings around .70 or higher are strong, loadings between .50 and .69 are moderate to strong, and loadings below .50 should be examined carefully. Statistical significance alone does not guarantee that an item is a strong or substantively useful indicator.
+
+## Reliability and Convergent Validity
+
+Composite reliability (CR) and average variance extracted (AVE) are calculated from the standardized loadings. These values are descriptive evidence and should be considered together with the loading pattern and model fit.
+
+```{r}
+reliability_table <- loading_table |>
+  group_by(factor) |>
+  summarise(
+    n_items = n(),
+    composite_reliability = sum(loading)^2 /
+      (sum(loading)^2 + sum(1 - loading^2)),
+    average_variance_extracted = mean(loading^2),
+    .groups = "drop"
+  ) |>
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+
+kable(
+  reliability_table,
+  caption = "Composite reliability and average variance extracted"
+)
+```
+
+Convergent validity is more defensible when the items have meaningful and reasonably strong loadings, composite reliability is acceptable, and the AVE indicates that the factor explains a substantial amount of variance in its indicators. These values should not be interpreted without considering the content of the items and the overall model fit.
+
+## Discriminant Validity
+
+The correlation between the two latent factors is examined to determine whether the constructs are empirically distinguishable.
+
+```{r}
+factor_correlation <- parameterEstimates(
+  cfa_fit,
+  standardized = TRUE
+) |>
+  filter(lhs == "Employee_Proficiencies", op == "~~", rhs == "Operational_Effectiveness") |>
+  transmute(
+    factor_1 = lhs,
+    factor_2 = rhs,
+    correlation = round(std.all, 3),
+    p_value = round(pvalue, 3)
+  )
+
+kable(factor_correlation, caption = "Correlation between the two latent factors")
+```
+
+The two constructs should be related but not indistinguishable. A very high factor correlation would suggest that employee proficiency and operational effectiveness may not be empirically separate constructs. The factor correlation should be interpreted together with the item content, standardized loadings, and reliability results.
+
+## Interpretation and Conclusion
+
+The CFA results provide evidence about whether the proposed two-factor structure is reasonable for Case 31. Employee Proficiencies is expected to represent members' perceptions of employee performance, while Operational Effectiveness represents members' broader evaluations of Credit Union management and operations.
+
+The most important evidence to review is the overall model fit, the standardized loading of each item, the reliability and AVE values for each factor, and the correlation between the two factors. If the model fit is weak or some operational-effectiveness items have low loadings, the one-factor operational-effectiveness construct should be treated cautiously because its items cover different topics and response formats.
+
+No items are removed and no error correlations are added automatically in this report. Any alternative model would need to be theoretically justified, clearly labeled, and compared with the original hypothesized model. Before using these constructs in a later structural model, the researcher should address any weak indicators or poor fit identified by the CFA.
+
+## References
+
+The measurement-model concepts in this report follow the CFA guidelines and course materials provided for Case 31. Standardized loadings near .50 or higher are treated as a general guideline rather than an automatic decision rule.
+
+## Appendix: Reproducibility and Publication Links
+
+- [GitHub Repository](https://github.com/jennyjeong53/M13)
+- [GitHub Pages](https://jennyjeong53.github.io/M13/)
+
+The final Quarto source file is `case31_measurement_model.qmd`, and the rendered report is `index.html`. The published GitHub Pages report and links were checked before submission.
+
